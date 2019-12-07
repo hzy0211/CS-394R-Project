@@ -104,22 +104,6 @@ class Actor_Critic(nn.Module):
         v_s = self.critic3(v_s)
         return action_probs, v_s
 
-
-class Critic(nn.Module):
-    def __init__(self, hl_size, n_input):
-        super(Critic, self).__init__()
-        self.fc1 = nn.Linear(n_input, hl_size)
-        self.fc2 = nn.Linear(hl_size, hl_size)
-        self.fc3 = nn.Linear(hl_size, 1)
-
-    def forward(self, state):
-        x = self.fc1(state)
-        x = F.relu(x)
-        x = self.fc2(x)
-        x = F.relu(x)
-        v_s = self.fc3(x)
-        return v_s
-
 def compute_returns(rewards, gamma=1):
     R = 0
     returns = []

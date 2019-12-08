@@ -96,6 +96,7 @@ class Actor_Critic(nn.Module):
         action_probs = F.relu(action_probs)
         action_probs = self.actor3(action_probs)
         action_probs = F.softmax(action_probs, dim=-1)
+        action_probs = action_probs * load
         #distribution = Categorical(F.softmax(output, dim=-1))
         v_s = self.critic1(load)
         v_s = F.relu(v_s)

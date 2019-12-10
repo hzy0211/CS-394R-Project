@@ -255,7 +255,7 @@ def main():
         plt.xlabel('Number of users', fontsize=18)
         plt.ylabel('Average waiting time', fontsize=18)
         plt.legend()
-        plt.savefig('tex/figures/streaming.pdf', bbox_inches='tight')
+        plt.savefig('streaming.pdf', bbox_inches='tight')
         plt.close()
 
 

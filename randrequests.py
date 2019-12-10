@@ -22,10 +22,10 @@ def genRequests(num_requests, arrival_rate):
     return new_req_seq
 
 # generating random user requests for single model scheduling
-def genNewReq():
+def genNewReq(n):
 	arrival_rate = 1.0/0.02
 	all_requests = []
-	for i in range(NUM_USERS):
+	for i in range(n):
 		curr_requests = genRequests(500, arrival_rate)
 		all_requests.extend(curr_requests)
 	all_requests.sort()

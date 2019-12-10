@@ -1,5 +1,6 @@
 import numpy as np
 from itertools import count
+import matplotlib
 import matplotlib.pyplot as plt
 import torch
 import torch.nn as nn
@@ -13,6 +14,9 @@ from Request import Request
 from Model_Parameters import Model_Parameters
 from System_Status import System_Status
 from Read_Layer import Read_Layer
+from randrequests import genNewReq
+from baseline import always_batching, no_batching
+import seaborn as sns
 
 class Env:
     def __init__(self, curr_status, new_req_seq, max_job, n_layers=38):
@@ -105,8 +109,7 @@ class Actor_Critic(nn.Module):
         action_probs = self.actor3(action_probs)
         action_probs = F.softmax(action_probs, dim=-1)
         action_probs = action_probs * load
-        #distribution = Categorical(F.softmax(output, dim=-1))
-        v_s = self.critic1(load)
+        v_s = self.critic1(state)
         v_s = F.relu(v_s)
         v_s = self.critic2(v_s)
         v_s = F.relu(v_s)
@@ -130,9 +133,6 @@ def get_action(state, load, actor_critic):
     return action, v_s, dist
 
 def read_layer(curr_status, data_file):
-    #print("batch size: ",BATCH_SIZE)
-    #print("num_shared_layers: ",curr_status.num_shared_layers)
-    #print("group_num_t: ",group_num_t, "group_num_shared: ",GROUP_NUM_SHARED)
     curr_sum = 0.0
     fp = open(data_file,"r")
     for i in range(BATCH_SIZE):
@@ -158,7 +158,6 @@ def read_layer(curr_status, data_file):
             group_num -= 1
             if abs(curr_sum)<1e-8:
                 curr_sum=0.0
-            #print("curr_sum: ",curr_sum,"group_num: ",group_num,"i: ",i, "num_shared_layers: ", curr_status.num_shared_layers)
             assert (group_num>=0)
             assert (curr_sum>=0)
             j += 1
@@ -169,7 +168,7 @@ def compute_time(start_idx, end_idx, batch_size, curr_status):
         time += curr_status.group_batch_matrix[batch_size-1][i]
     return time
 
-def rl(curr_status, new_req_seq, n_episode=500, gamma=1):
+def rl(curr_status, new_req_seq, n_episode=300, gamma=1):
     env = Env(curr_status, new_req_seq, NUM_NEW_REQUEST, GROUP_NUM)
     n_input = env.observation_space
     action_space = env.action_space
@@ -184,7 +183,7 @@ def rl(curr_status, new_req_seq, n_episode=500, gamma=1):
         saved_logprobs = []
         saved_values = []
         rewards = []
-        for t in range(5000):
+        for t in range(1000):
             env.new_request()
             action, v_s, dist = get_action(state, load, ac)
             log_prob = dist.log_prob(action).unsqueeze(0)
@@ -218,9 +217,16 @@ def rl(curr_status, new_req_seq, n_episode=500, gamma=1):
         loss.backward()
         optimizer.step()
 
-    print('best:{}'.format(best))
-    #plt.plot(reward_history)
-    #plt.show()
+    return reward_history
+def initialize_status(curr_status):
+    curr_status.group_batch[0] = 3
+    curr_status.group_batch[1] = 1
+    curr_status.group_batch[2] = 5
+    curr_status.group_batch[3] = 0
+    curr_status.group_batch[4] = 2
+    return curr_status
+
+
 
 def main():
     curr_status = System_Status()
@@ -231,12 +237,40 @@ def main():
     curr_status.group_batch[3] = 0
     curr_status.group_batch[4] = 2
     # print(rt_table)
-    new_req_seq = []
-    f = open('request.txt','r')
-    for i in f.readline().split():
-        new_req_seq.append(float(i))
-    f.close()
-    rl(curr_status, new_req_seq)
+    rl_reward = np.zeros(13)
+    nb_reward = np.zeros(13)
+    ab_reward = np.zeros(13)
+    number_users = np.array([1, 2, 5, 8, 10, 15, 20, 25, 30, 35, 40, 45, 50])
+    for i, n in enumerate(number_users):
+        new_req_seq = genNewReq(n)
+        rl_reward[i] = -np.mean(rl(curr_status, new_req_seq, 200)) / 61
+        curr_status = initialize_status(curr_status)
+        nb_reward[i] = no_batching(curr_status, new_req_seq) / 61
+        curr_status = initialize_status(curr_status)
+        ab_reward[i] = always_batching(curr_status, new_req_seq) / 61
+        curr_status = initialize_status(curr_status)
+
+    np.save('ac_streaming.npy', rl_reward)
+    np.save('nb_streaming.npy', nb_reward)
+    np.save('ab_streaming.npy', ab_reward)
+
+    with sns.axes_style('white', {'legend.frameon': True}):
+        plt.rc('font', weight='bold')
+        plt.rc('grid', lw=5)
+        plt.rc('lines', lw=3)
+        matplotlib.rcParams['pdf.fonttype'] = 42
+        matplotlib.rcParams['ps.fonttype'] = 42
+        plt.grid(color='gray', alpha = 0.6, linestyle='-', linewidth=1)
+        plt.plot(number_users, rl_reward, label='GAE Actor-Critic')
+        plt.plot(number_users, ab_reward, label='always batching')
+        plt.plot(number_users, nb_reward, label='no batching')
+        plt.xlabel('Number of users', fontsize=18)
+        plt.ylabel('Average waiting time', fontsize=18)
+        plt.legend()
+        plt.savefig('tex/figures/streaming.pdf', bbox_inches='tight')
+        plt.close()
+
+
     # i = 0
     # time_stamp = 0.0
     # wait_time = 0.0

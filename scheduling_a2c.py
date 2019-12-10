@@ -1,5 +1,6 @@
 import numpy as np
 from itertools import count
+import matplotlib
 import matplotlib.pyplot as plt
 import torch
 import torch.nn as nn
@@ -13,8 +14,10 @@ from Request import Request
 from Model_Parameters import Model_Parameters
 from System_Status import System_Status
 from Read_Layer import Read_Layer
+from baseline import always_batching, no_batching
+import seaborn as sns
 
-class Env:
+class Env_static:
     def __init__(self, rt_table, new_req_seq, max_job, n_layers=38):
         assert rt_table.shape[1] == n_layers
         self.n_layers = n_layers
@@ -42,7 +45,7 @@ class Env:
         self.state[2] = 5
         self.state[3] = 0
         self.state[4] = 2
-        return self.state
+        return self.state, self.load
 
     def new_request(self):
         while (self.job_counter < NUM_NEW_REQUEST):           
@@ -56,28 +59,37 @@ class Env:
     def step(self, action):
         layer_select = action
         running_load = self.state[layer_select]
-        # print('# job running: {}'.format(running_load))
         n_jobwaiting = self.state.sum()
         self.state[layer_select] = 0
         self.load[layer_select] = 0
-        # print('# job waiting: {}'.format(n_jobwaiting))
         if layer_select + 1 < self.n_layers:
             self.state[layer_select + 1] += running_load
             self.load[layer_select + 1] = 1
         running_time = self.rt_table[max(int(running_load - 1), 0), layer_select]
-        # print('running_time: {}'.format(running_time))
         self.time += running_time
-        # print('time till last: {}'.format(self.time_till_last))
         reward = -running_time * n_jobwaiting
         if running_load == 0:
             reward = -1
         if self.state.sum() == 0:
             self.is_done = True
-        #if self.job_counter < NUM_NEW_REQUEST and self.state.sum() == 0:
-        #    self.time = max(self.time, self.new_req_seq[self.job_counter])
-        #if self.job_counter == NUM_NEW_REQUEST and self.state.sum() == 0:
-        #    self.is_done = True
-        return self.state, reward, self.is_done
+        return self.state, self.load, reward, self.is_done
+
+class Reinforce(nn.Module):
+    def __init__(self, hl_size, n_input, action_space):
+        super(Reinforce, self).__init__()
+        self.actor1 = nn.Linear(n_input, hl_size)
+        self.actor2 = nn.Linear(hl_size, hl_size)
+        self.actor3 = nn.Linear(hl_size, action_space)
+
+    def forward(self, state, load):
+        action_probs = self.actor1(state)
+        action_probs = F.relu(action_probs)
+        action_probs = self.actor2(action_probs)
+        action_probs = F.relu(action_probs)
+        action_probs = self.actor3(action_probs)
+        action_probs = F.softmax(action_probs, dim=-1) * load
+        return action_probs, 0
+
 
 class Actor_Critic(nn.Module):
     def __init__(self, hl_size, n_input, action_space):
@@ -89,14 +101,14 @@ class Actor_Critic(nn.Module):
         self.critic2 = nn.Linear(hl_size, hl_size)
         self.critic3 = nn.Linear(hl_size, 1)
 
-    def forward(self, state):
+    def forward(self, state, load):
         action_probs = self.actor1(state)
         action_probs = F.relu(action_probs)
         action_probs = self.actor2(action_probs)
         action_probs = F.relu(action_probs)
         action_probs = self.actor3(action_probs)
         action_probs = F.softmax(action_probs, dim=-1)
-        #distribution = Categorical(F.softmax(output, dim=-1))
+        action_probs = action_probs * load
         v_s = self.critic1(state)
         v_s = F.relu(v_s)
         v_s = self.critic2(v_s)
@@ -112,9 +124,10 @@ def compute_returns(rewards, gamma=1):
         returns.insert(0, R)
     return returns
 
-def get_action(state, actor_critic):
+def get_action(state, load, model):
     state = torch.tensor(state).float()
-    action_probs, v_s= actor_critic(state)
+    load = torch.tensor(load).float()
+    action_probs, v_s= model(state, load)
     dist = Categorical(action_probs)
     action = dist.sample()
     return action, v_s, dist
@@ -153,17 +166,8 @@ def read_layer(curr_status, data_file):
             assert (curr_sum>=0)
             j += 1
 
-def main(n_episode= 1000, gamma=1):
-    curr_status = System_Status()
-    read_layer(curr_status, "vgg16_titanx_default_pred.txt")
-    rt_table = np.array(curr_status.group_batch_matrix)
-    # print(rt_table)
-    f = open('request.txt','r')
-    new_req_seq = []
-    for i in f.readline().split():
-        new_req_seq.append(float(i))
-    f.close()
-    env = Env(rt_table, new_req_seq, 90, 5)
+def ac_gae(rt_table, new_req_seq, n_episode=1000, gamma=1):
+    env = Env_static(rt_table, new_req_seq, 90, 5)
     n_input = env.observation_space
     action_space = env.action_space
     hl_size = 128
@@ -172,16 +176,16 @@ def main(n_episode= 1000, gamma=1):
     reward_history = np.zeros(n_episode)
     best = -1
     for i in range(n_episode):
-        state = env.reset()
+        state, load = env.reset()
         saved_logprobs = []
         saved_values = []
         rewards = []
         for t in range(1000):
-            action, v_s, dist = get_action(state, ac)
+            action, v_s, dist = get_action(state, load, ac)
             log_prob = dist.log_prob(action).unsqueeze(0)
             saved_logprobs.append(log_prob)
             saved_values.append(v_s)
-            state, reward, is_done = env.step(action.item())
+            state, load, reward, is_done = env.step(action.item())
             rewards.append(torch.tensor([reward], dtype=torch.float))
             reward_history[i] += reward
             if i == n_episode - 1:
@@ -208,9 +212,138 @@ def main(n_episode= 1000, gamma=1):
         loss.backward()
         optimizer.step()
 
-    print('best:{}'.format(best))
-    plt.plot(reward_history)
-    plt.show()
+    return reward_history
+
+def reinforce(rt_table, new_req_seq, n_episode=1000, gamma=1):
+    env = Env_static(rt_table, new_req_seq, 90, 5)
+    n_input = env.observation_space
+    action_space = env.action_space
+    hl_size = 128
+    ri = Reinforce(hl_size, 5, 5)
+    optimizer = optim.Adam(ri.parameters())
+    reward_history = np.zeros(n_episode)
+    best = -1
+    for i in range(n_episode):
+        state, load = env.reset()
+        saved_logprobs = []
+        saved_values = []
+        rewards = []
+        for t in range(1000):
+            action, _, dist = get_action(state, load, ri)
+            log_prob = dist.log_prob(action).unsqueeze(0)
+            saved_logprobs.append(log_prob)
+            state, load, reward, is_done = env.step(action.item())
+            rewards.append(torch.tensor([reward], dtype=torch.float))
+            reward_history[i] += reward
+            if i == n_episode - 1:
+                print('time: {}, state: {}'.format(env.time, env.state))
+                print('load: {}'.format(env.load))
+                print('action: {}'.format(action))
+            if is_done:
+                print('Iteration: {}, Score: {}'.format(i, reward_history[i]))
+                break
+        best = max(best, reward_history[i])
+        returns = compute_returns(rewards)
+
+        log_probs = torch.cat(saved_logprobs)
+        returns = torch.cat(returns).detach()
+        loss = -(log_probs * returns).mean()
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+    print(sum(p.numel() for p in ri.parameters() if p.requires_grad))
+
+    return reward_history
+
+
+
+def main(n_episode= 1000, gamma=1):
+    curr_status = System_Status()
+    read_layer(curr_status, "vgg16_titanx_default_pred.txt")
+    curr_status.group_batch[0] = 3
+    curr_status.group_batch[1] = 1
+    curr_status.group_batch[2] = 5
+    curr_status.group_batch[3] = 0
+    curr_status.group_batch[4] = 2
+    rt_table = np.array(curr_status.group_batch_matrix)
+    # print(rt_table)
+    f = open('request.txt','r')
+    new_req_seq = []
+    # for i in f.readline().split():
+    #     new_req_seq.append(float(i))
+    # f.close()
+    ac_reward = ac_gae(rt_table, new_req_seq)
+
+    ri_reward = reinforce(rt_table, new_req_seq)
+    np.save('ac_static.npy', ac_reward)
+    np.save('ri_static.npy', ri_reward)
+    baseline_1 = -0.35
+    baseline_2 = -0.65
+    with sns.axes_style('white', {'legend.frameon': True}):
+        plt.rc('font', weight='bold')
+        plt.rc('grid', lw=5)
+        plt.rc('lines', lw=3)
+        matplotlib.rcParams['pdf.fonttype'] = 42
+        matplotlib.rcParams['ps.fonttype'] = 42
+        plt.grid(color='gray', alpha = 0.6, linestyle='-', linewidth=1)
+        plt.plot(ac_reward, label='GAE Actor-Critic')
+        plt.plot(ri_reward, label='REINFORCE')
+        plt.hlines(baseline_1, 0, 999, color = 'gray', ls='dashed', label='always batching')
+        plt.hlines(baseline_2, 0, 999, color = 'green', ls='dashed', label='no batching')
+        plt.xlabel('Episode', fontsize=18)
+        plt.ylabel('Total Rewards', fontsize=18)
+        plt.legend()
+        plt.savefig('tex/figures/runing_time.pdf', bbox_inches='tight')
+        plt.close()
+
+    # env = Env_static(rt_table, new_req_seq, 90, 5)
+    # n_input = env.observation_space
+    # action_space = env.action_space
+    # hl_size = 128
+    # ac = Actor_Critic(hl_size, 5, 5)
+    # optimizer = optim.Adam(ac.parameters())
+    # reward_history = np.zeros(n_episode)
+    # best = -1
+    # for i in range(n_episode):
+    #     state = env.reset()
+    #     saved_logprobs = []
+    #     saved_values = []
+    #     rewards = []
+    #     for t in range(1000):
+    #         action, v_s, dist = get_action(state, ac)
+    #         log_prob = dist.log_prob(action).unsqueeze(0)
+    #         saved_logprobs.append(log_prob)
+    #         saved_values.append(v_s)
+    #         state, reward, is_done = env.step(action.item())
+    #         rewards.append(torch.tensor([reward], dtype=torch.float))
+    #         reward_history[i] += reward
+    #         if i == n_episode - 1:
+    #             print('time: {}, state: {}'.format(env.time, env.state))
+    #             print('load: {}'.format(env.load))
+    #             print('action: {}'.format(action))
+    #         if is_done:
+    #             print('Iteration: {}, Score: {}'.format(i, reward_history[i]))
+    #             break
+    #     best = max(best, reward_history[i])
+    #     returns = compute_returns(rewards)
+
+    #     log_probs = torch.cat(saved_logprobs)
+    #     returns = torch.cat(returns).detach()
+    #     values = torch.cat(saved_values)
+
+    #     advantage = returns - values
+
+    #     actor_loss = -(log_probs * advantage.detach()).mean()
+    #     critic_loss = advantage.pow(2).mean()
+    #     loss = actor_loss + critic_loss
+
+    #     optimizer.zero_grad()
+    #     loss.backward()
+    #     optimizer.step()
+
+    # print('best:{}'.format(best))
+    # plt.plot(reward_history)
+    # plt.show()
 
 
 if __name__ == '__main__':

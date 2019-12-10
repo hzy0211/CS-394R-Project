@@ -1,5 +1,4 @@
 import numpy as np
-from itertools import count
 import matplotlib
 import matplotlib.pyplot as plt
 import torch
@@ -10,8 +9,6 @@ from torch.distributions import Categorical
 from torch.autograd import Variable
 import math
 from utils import *
-from Request import Request
-from Model_Parameters import Model_Parameters
 from System_Status import System_Status
 from Read_Layer import Read_Layer
 from randrequests import genNewReq
@@ -66,18 +63,14 @@ class Env:
     def step(self, action):
         layer_select = action
         running_load = self.state[layer_select]
-        # print('# job running: {}'.format(running_load))
         n_jobwaiting = self.state.sum() + self.wait_job
         self.state[layer_select] = 0
         self.load[layer_select] = 0
-        # print('# job waiting: {}'.format(n_jobwaiting))
         if layer_select + 1 < self.n_layers:
             self.state[layer_select + 1] += running_load
             self.load[layer_select + 1] = 1
         running_time = self.rt_table[max(int(running_load - 1), 0), layer_select]
-        # print('running_time: {}'.format(running_time))
         self.time += running_time
-        # print('time till last: {}'.format(self.time_till_last))
         reward = -running_time * n_jobwaiting
         if running_load == 0:
             reward = -1
@@ -85,10 +78,6 @@ class Env:
             self.is_done = True
         if self.state.sum() == 0 and self.job_counter < NUM_NEW_REQUEST:
             self.time = max(self.time, self.new_req_seq[self.job_counter])
-        #if self.job_counter < NUM_NEW_REQUEST and self.state.sum() == 0:
-        #    self.time = max(self.time, self.new_req_seq[self.job_counter])
-        #if self.job_counter == NUM_NEW_REQUEST and self.state.sum() == 0:
-        #    self.is_done = True
         return self.state, self.load, reward, self.is_done
 
 class Actor_Critic(nn.Module):
@@ -236,7 +225,6 @@ def main():
     curr_status.group_batch[2] = 5
     curr_status.group_batch[3] = 0
     curr_status.group_batch[4] = 2
-    # print(rt_table)
     rl_reward = np.zeros(13)
     nb_reward = np.zeros(13)
     ab_reward = np.zeros(13)
@@ -269,37 +257,6 @@ def main():
         plt.legend()
         plt.savefig('tex/figures/streaming.pdf', bbox_inches='tight')
         plt.close()
-
-
-    # i = 0
-    # time_stamp = 0.0
-    # wait_time = 0.0
-    # wait_job = 0
-    # while i < NUM_NEW_REQUEST or np.array(curr_status.group_batch).sum() != 0:
-    #     if (wait_job > 0 and np.array(curr_status.group_batch).sum() < MEMORY_SIZE) or (i < NUM_NEW_REQUEST and new_req_seq[i] <= time_stamp):
-    #         if np.array(curr_status.group_batch).sum() >= MEMORY_SIZE:
-    #             wait_job += 1
-    #         elif wait_job > 0:
-    #             curr_status.group_batch[0] += 1
-    #             wait_job -= 1
-    #         else:
-    #             curr_status.group_batch[0] += 1
-    #         i += 1
-    #     elif np.array(curr_status.group_batch).sum() == 0:
-    #         time_stamp = max(time_stamp, new_req_seq[i])
-    #     else:
-    #         order = rl(curr_status, wait_job)
-    #         for j in order:
-    #             if curr_status.group_batch[j] > 0:
-    #                 break
-    #         time_stamp += compute_time(j, j+1, curr_status.group_batch[j], curr_status)
-    #         wait_time += compute_time(j, j+1, curr_status.group_batch[j], curr_status) * (np.array(curr_status.group_batch).sum()+wait_job)
-    #         if j == GROUP_NUM-1:
-    #             curr_status.group_batch[j] = 0
-    #         else:
-    #             curr_status.group_batch[j+1] += curr_status.group_batch[j]
-    #             curr_status.group_batch[j] = 0
-    # print(wait_time)
 
 
 if __name__ == '__main__':

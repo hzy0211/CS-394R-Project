@@ -133,9 +133,6 @@ def get_action(state, load, model):
     return action, v_s, dist
 
 def read_layer(curr_status, data_file):
-    #print("batch size: ",BATCH_SIZE)
-    #print("num_shared_layers: ",curr_status.num_shared_layers)
-    #print("group_num_t: ",group_num_t, "group_num_shared: ",GROUP_NUM_SHARED)
     curr_sum = 0.0
     fp = open(data_file,"r")
     for i in range(BATCH_SIZE):
@@ -161,7 +158,6 @@ def read_layer(curr_status, data_file):
             group_num -= 1
             if abs(curr_sum)<1e-8:
                 curr_sum=0.0
-            #print("curr_sum: ",curr_sum,"group_num: ",group_num,"i: ",i, "num_shared_layers: ", curr_status.num_shared_layers)
             assert (group_num>=0)
             assert (curr_sum>=0)
             j += 1
@@ -266,12 +262,8 @@ def main(n_episode= 1000, gamma=1):
     curr_status.group_batch[3] = 0
     curr_status.group_batch[4] = 2
     rt_table = np.array(curr_status.group_batch_matrix)
-    # print(rt_table)
     f = open('request.txt','r')
     new_req_seq = []
-    # for i in f.readline().split():
-    #     new_req_seq.append(float(i))
-    # f.close()
     ac_reward = ac_gae(rt_table, new_req_seq)
 
     ri_reward = reinforce(rt_table, new_req_seq)
@@ -295,56 +287,6 @@ def main(n_episode= 1000, gamma=1):
         plt.legend()
         plt.savefig('tex/figures/runing_time.pdf', bbox_inches='tight')
         plt.close()
-
-    # env = Env_static(rt_table, new_req_seq, 90, 5)
-    # n_input = env.observation_space
-    # action_space = env.action_space
-    # hl_size = 128
-    # ac = Actor_Critic(hl_size, 5, 5)
-    # optimizer = optim.Adam(ac.parameters())
-    # reward_history = np.zeros(n_episode)
-    # best = -1
-    # for i in range(n_episode):
-    #     state = env.reset()
-    #     saved_logprobs = []
-    #     saved_values = []
-    #     rewards = []
-    #     for t in range(1000):
-    #         action, v_s, dist = get_action(state, ac)
-    #         log_prob = dist.log_prob(action).unsqueeze(0)
-    #         saved_logprobs.append(log_prob)
-    #         saved_values.append(v_s)
-    #         state, reward, is_done = env.step(action.item())
-    #         rewards.append(torch.tensor([reward], dtype=torch.float))
-    #         reward_history[i] += reward
-    #         if i == n_episode - 1:
-    #             print('time: {}, state: {}'.format(env.time, env.state))
-    #             print('load: {}'.format(env.load))
-    #             print('action: {}'.format(action))
-    #         if is_done:
-    #             print('Iteration: {}, Score: {}'.format(i, reward_history[i]))
-    #             break
-    #     best = max(best, reward_history[i])
-    #     returns = compute_returns(rewards)
-
-    #     log_probs = torch.cat(saved_logprobs)
-    #     returns = torch.cat(returns).detach()
-    #     values = torch.cat(saved_values)
-
-    #     advantage = returns - values
-
-    #     actor_loss = -(log_probs * advantage.detach()).mean()
-    #     critic_loss = advantage.pow(2).mean()
-    #     loss = actor_loss + critic_loss
-
-    #     optimizer.zero_grad()
-    #     loss.backward()
-    #     optimizer.step()
-
-    # print('best:{}'.format(best))
-    # plt.plot(reward_history)
-    # plt.show()
-
 
 if __name__ == '__main__':
     main()

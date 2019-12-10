@@ -282,7 +282,7 @@ def main(n_episode= 1000, gamma=1):
         plt.xlabel('Episode', fontsize=18)
         plt.ylabel('Total Rewards', fontsize=18)
         plt.legend()
-        plt.savefig('tex/figures/runing_time.pdf', bbox_inches='tight')
+        plt.savefig('runing_time.pdf', bbox_inches='tight')
         plt.close()
 
 if __name__ == '__main__':

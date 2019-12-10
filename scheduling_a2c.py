@@ -1,5 +1,4 @@
 import numpy as np
-from itertools import count
 import matplotlib
 import matplotlib.pyplot as plt
 import torch
@@ -10,8 +9,6 @@ from torch.distributions import Categorical
 from torch.autograd import Variable
 import math
 from utils import *
-from Request import Request
-from Model_Parameters import Model_Parameters
 from System_Status import System_Status
 from Read_Layer import Read_Layer
 from baseline import always_batching, no_batching
